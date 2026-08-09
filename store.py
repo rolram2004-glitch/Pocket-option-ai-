@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from models import Direction, Profile, Signal, StrategyMode, Trade
 
@@ -69,6 +69,13 @@ class Store:
                     candle_time TEXT NOT NULL,
                     direction TEXT NOT NULL,
                     PRIMARY KEY (chat_id, asset, candle_time)
+                );
+
+                CREATE TABLE IF NOT EXISTS strategy_ledgers (
+                    chat_id INTEGER NOT NULL,
+                    strategy_variant TEXT NOT NULL,
+                    balance REAL NOT NULL,
+                    PRIMARY KEY (chat_id, strategy_variant)
                 );
                 """
             )
@@ -150,19 +157,65 @@ class Store:
             )
         return self.get_profile(chat_id)
 
-    def daily_stats(self, chat_id: int) -> tuple[int, float]:
+    def daily_stats(
+        self, chat_id: int, strategy_variant: str | None = None
+    ) -> tuple[int, float]:
         today = datetime.now(UTC).date().isoformat()
         with self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT COUNT(*) AS n, COALESCE(SUM(pnl), 0) AS pnl
-                FROM trades
-                WHERE chat_id = ? AND substr(created_at, 1, 10) = ?
-                """,
-                (chat_id, today),
-            ).fetchone()
+            if strategy_variant is None:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS n, COALESCE(SUM(pnl), 0) AS pnl
+                    FROM trades
+                    WHERE chat_id = ? AND substr(created_at, 1, 10) = ?
+                    """,
+                    (chat_id, today),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS n, COALESCE(SUM(pnl), 0) AS pnl
+                    FROM trades
+                    WHERE chat_id = ? AND substr(created_at, 1, 10) = ?
+                      AND strategy_variant = ?
+                    """,
+                    (chat_id, today, strategy_variant),
+                ).fetchone()
         assert row is not None
         return int(row["n"]), float(row["pnl"])
+
+    def strategy_ledger_balance(self, chat_id: int, strategy_variant: str) -> float:
+        if strategy_variant not in {
+            StrategyMode.NORMAL.value,
+            StrategyMode.INVERSE.value,
+        }:
+            raise ValueError("Versione strategia non valida")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO strategy_ledgers
+                (chat_id, strategy_variant, balance) VALUES (?, ?, ?)
+                """,
+                (chat_id, strategy_variant, self.start_balance),
+            )
+            row = conn.execute(
+                """
+                SELECT balance FROM strategy_ledgers
+                WHERE chat_id = ? AND strategy_variant = ?
+                """,
+                (chat_id, strategy_variant),
+            ).fetchone()
+        assert row is not None
+        return float(row["balance"])
+
+    def strategy_balances(self, chat_id: int) -> dict[str, float]:
+        return {
+            variant: self.strategy_ledger_balance(chat_id, variant)
+            for variant in (
+                StrategyMode.NORMAL.value,
+                StrategyMode.INVERSE.value,
+            )
+        }
 
     def create_demo_trade(
         self,
@@ -173,16 +226,34 @@ class Store:
         strategy_variant: str | None = None,
     ) -> Trade:
         profile = self.get_profile(chat_id)
-        if profile.demo_balance < profile.trade_amount:
+        is_strategy_trade = strategy_variant in {
+            StrategyMode.NORMAL.value,
+            StrategyMode.INVERSE.value,
+        }
+        available_balance = (
+            self.strategy_ledger_balance(chat_id, strategy_variant)
+            if is_strategy_trade and strategy_variant is not None
+            else profile.demo_balance
+        )
+        if available_balance < profile.trade_amount:
             raise ValueError("Saldo DEMO insufficiente")
 
         trade_id = uuid.uuid4().hex[:10].upper()
         created_at = datetime.now(UTC).isoformat(timespec="seconds")
         with self._connect() as conn:
-            conn.execute(
-                "UPDATE profiles SET demo_balance = demo_balance - ? WHERE chat_id = ?",
-                (profile.trade_amount, chat_id),
-            )
+            if is_strategy_trade:
+                conn.execute(
+                    """
+                    UPDATE strategy_ledgers SET balance = balance - ?
+                    WHERE chat_id = ? AND strategy_variant = ?
+                    """,
+                    (profile.trade_amount, chat_id, strategy_variant),
+                )
+            else:
+                conn.execute(
+                    "UPDATE profiles SET demo_balance = demo_balance - ? WHERE chat_id = ?",
+                    (profile.trade_amount, chat_id),
+                )
             conn.execute(
                 """
                 INSERT INTO trades
@@ -251,10 +322,29 @@ class Store:
                    WHERE chat_id = ? AND trade_id = ?""",
                 (result, pnl, exit_price, chat_id, trade.trade_id),
             )
-            conn.execute(
-                "UPDATE profiles SET demo_balance = demo_balance + ? WHERE chat_id = ?",
-                (credit, chat_id),
-            )
+            if trade.strategy_variant in {
+                StrategyMode.NORMAL.value,
+                StrategyMode.INVERSE.value,
+            }:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO strategy_ledgers
+                    (chat_id, strategy_variant, balance) VALUES (?, ?, ?)
+                    """,
+                    (chat_id, trade.strategy_variant, self.start_balance),
+                )
+                conn.execute(
+                    """
+                    UPDATE strategy_ledgers SET balance = balance + ?
+                    WHERE chat_id = ? AND strategy_variant = ?
+                    """,
+                    (credit, chat_id, trade.strategy_variant),
+                )
+            else:
+                conn.execute(
+                    "UPDATE profiles SET demo_balance = demo_balance + ? WHERE chat_id = ?",
+                    (credit, chat_id),
+                )
         return self.get_trade(chat_id, trade.trade_id)
 
     def strategy_chat_ids(self) -> list[int]:
@@ -301,9 +391,12 @@ class Store:
             ).fetchall()
         return [self._row_to_trade(row) for row in rows]
 
-    def strategy_comparison(self, chat_id: int) -> dict[str, dict[str, float | int]]:
-        """Return all-time closed DEMO results split by RSI strategy variant."""
+    def strategy_comparison(
+        self, chat_id: int, days: int = 7
+    ) -> dict[str, dict[str, float | int]]:
+        """Return recent closed DEMO results split by RSI strategy variant."""
         result: dict[str, dict[str, float | int]] = {}
+        since = (datetime.now(UTC) - timedelta(days=days)).isoformat(timespec="seconds")
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -317,9 +410,10 @@ class Store:
                 WHERE chat_id = ?
                   AND strategy_variant IN ('NORMALE', 'INVERSA')
                   AND status IN ('WIN', 'LOSS', 'TIE')
+                  AND created_at >= ?
                 GROUP BY strategy_variant
                 """,
-                (chat_id,),
+                (chat_id, since),
             ).fetchall()
         for variant in (StrategyMode.NORMAL.value, StrategyMode.INVERSE.value):
             row = next(
@@ -337,6 +431,7 @@ class Store:
                 "ties": ties,
                 "win_rate": (wins / decided * 100.0) if decided else 0.0,
                 "pnl": float(row["pnl"]) if row else 0.0,
+                "balance": self.strategy_ledger_balance(chat_id, variant),
             }
         return result
 
