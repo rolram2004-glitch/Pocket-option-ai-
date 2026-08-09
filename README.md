@@ -108,6 +108,9 @@ generane una nuova.
 - `/settle ID WIN` — chiude manualmente un trade DEMO di collaudo
 
 Puoi anche inoltrare al bot un normale messaggio contenente il segnale.
+Quando riceve `/start`, la release v5 elimina i recenti messaggi del bot per
+rimuovere anche eventuali vecchi pulsanti URL già incorporati da Telegram; lo
+storico dei trade nel database non viene cancellato.
 
 ## Railway
 

@@ -29,7 +29,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO
 )
 log = logging.getLogger("pocket-ai")
-BOT_RELEASE = "SENZA-LINK-v4"
+BOT_RELEASE = "SENZA-LINK-v5"
 
 CONFIG = Settings.from_env()
 STORE = Store(
@@ -197,6 +197,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _guard(update):
         return
     assert update.effective_chat and update.effective_message
+    # Telegram keeps URL buttons inside messages already sent. The Bot API
+    # cannot search chat history by text, so on /start we remove the most
+    # recent messages that were sent by this bot. Attempts against user
+    # messages simply fail and are ignored. Trade data remains in SQLite.
+    current_message_id = update.effective_message.message_id
+    for message_id in range(max(1, current_message_id - 12), current_message_id):
+        try:
+            await context.bot.delete_message(update.effective_chat.id, message_id)
+        except Exception as exc:
+            log.debug("Legacy panel cleanup skipped message %s: %s", message_id, exc)
     text, keyboard = _dashboard(update.effective_chat.id)
     await update.effective_message.reply_text(
         text, reply_markup=keyboard, parse_mode=ParseMode.HTML
