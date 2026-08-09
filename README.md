@@ -21,7 +21,7 @@ eseguito in locale o come worker su Railway.
   ogni versione;
 - anti-duplicazione: una stessa candela RSI non può aprire due volte lo stesso
   segnale, anche dopo un riavvio;
-- pulsante/istruzioni per aprire il bot Telegram ufficiale di Pocket Option.
+- nessuna richiesta di password, cookie o sessione Pocket Option.
 
 ## Strategia RSI automatica
 
@@ -42,9 +42,10 @@ La decisione scatta quando l'RSI attraversa la soglia ed entra nella zona
 estrema. Il controllo dell'attraversamento evita che un RSI fermo sopra 86 o
 sotto 14 crei una raffica di ordini duplicati.
 
-Per accenderla imposta `TWELVE_DATA_API_KEY` e premi **📡 RSI AUTO** in Telegram.
-I simboli iniziali sono `EUR/USD;GBP/USD;BTC/USD` e si cambiano con
-`AUTO_SYMBOLS`.
+Per accenderla premi **📡 RSI AUTO** in Telegram: non serve alcuna chiave.
+Senza `TWELVE_DATA_API_KEY` il bot usa il feed pubblico Kraken per `BTC/USD`
+(oltre a `ETH/USD` e `SOL/USD` se inseriti in `AUTO_SYMBOLS`). Se configuri una
+chiave Twelve Data, può usare anche i simboli FX indicati in `AUTO_SYMBOLS`.
 
 La strategia non assegna una falsa "probabilità di vincita" al valore RSI. La
 performance va misurata su DEMO prima di qualsiasi uso con fondi reali.
@@ -56,10 +57,6 @@ collegato al conto, scegliere **Demo o Real** e usare Auto-trade. Pocket Option
 afferma inoltre che automazioni esterne non approvate possono violare le sue
 condizioni. Per questo il progetto **non** contiene cookie, SSID, WebSocket
 privati, reverse engineering o una falsa "API Pocket Option".
-
-Il pulsante **PocketSignals** apre direttamente `https://t.me/PocketSignals` in
-Telegram, senza passare dal sito Pocket Option. La voce
-`PO_OFFICIAL_TELEGRAM_BOT_URL` permette di sostituire il collegamento se cambia.
 
 Il ledger chiamato "DEMO locale" è volutamente distinto dal conto DEMO di
 Pocket Option. Per far eseguire gli ordini sul **DEMO Pocket Option vero** bisogna
@@ -76,8 +73,7 @@ nel conto Pocket Option.
 1. Su Telegram apri **@BotFather**, crea un bot con `/newbot` e copia il token.
 2. Copia `.env.example` in `.env`.
 3. Inserisci `TELEGRAM_BOT_TOKEN` in `.env`.
-4. Per la strategia automatica inserisci anche `TWELVE_DATA_API_KEY`.
-5. Installa ed esegui:
+4. Installa ed esegui:
 
    ```bash
    python -m venv .venv
@@ -86,7 +82,7 @@ nel conto Pocket Option.
    python bot.py
    ```
 
-6. Apri il tuo bot Telegram, invia `/start` e premi **📡 RSI AUTO OFF** per
+5. Apri il tuo bot Telegram, invia `/start` e premi **📡 RSI AUTO OFF** per
    portarlo su ON.
 
 Per rendere il bot privato, inserisci anche il tuo ID numerico in

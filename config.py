@@ -41,7 +41,6 @@ class Settings:
     rsi_period: int
     rsi_lower: float
     rsi_upper: float
-    po_official_telegram_bot_url: str | None
     database_path: str
 
     @classmethod
@@ -74,11 +73,6 @@ class Settings:
             rsi_period=_int("RSI_PERIOD", 7),
             rsi_lower=_float("RSI_LOWER", 14.0),
             rsi_upper=_float("RSI_UPPER", 86.0),
-            po_official_telegram_bot_url=os.getenv(
-                "PO_OFFICIAL_TELEGRAM_BOT_URL",
-                "https://t.me/PocketSignals",
-            ).strip()
-            or None,
             database_path=os.getenv("DATABASE_PATH", "pocket_ai.sqlite3").strip(),
         )
 

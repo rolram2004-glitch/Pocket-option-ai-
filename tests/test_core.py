@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from models import Candle, Direction, StrategyMode  # noqa: E402
+from market import KrakenPublicMarket  # noqa: E402
 from parser import parse_signal  # noqa: E402
 from risk import check_demo_trade  # noqa: E402
 from store import Store  # noqa: E402
@@ -79,6 +80,47 @@ class StrategyTests(unittest.TestCase):
         self.assertIsNotNone(decision)
         assert decision is not None
         self.assertEqual(decision.level, RsiLevel.UPPER)
+
+
+class PublicMarketTests(unittest.TestCase):
+    def test_keyless_feed_supports_crypto_only(self):
+        self.assertTrue(KrakenPublicMarket.supports("BTC/USD"))
+        self.assertTrue(KrakenPublicMarket.supports("ethusd"))
+        self.assertFalse(KrakenPublicMarket.supports("EUR/USD"))
+        self.assertEqual(KrakenPublicMarket.pair_for("BTC/USD"), "XBTUSD")
+
+    def test_kraken_payload_excludes_open_candle_for_signals(self):
+        payload = {
+            "error": [],
+            "result": {
+                "BTC/USD": [
+                    [100, "1", "2", "0.5", "1.5", "1.2", "3", 4],
+                    [160, "1.5", "3", "1", "2.5", "2", "4", 5],
+                ],
+                "last": 160,
+            },
+        }
+        candles = KrakenPublicMarket._parse_payload(
+            "BTC/USD", payload, 20, include_current=False
+        )
+        self.assertEqual(len(candles), 1)
+        self.assertEqual(candles[-1].close, 1.5)
+
+    def test_kraken_live_price_includes_open_candle(self):
+        payload = {
+            "error": [],
+            "result": {
+                "BTC/USD": [
+                    [100, "1", "2", "0.5", "1.5", "1.2", "3", 4],
+                    [160, "1.5", "3", "1", "2.5", "2", "4", 5],
+                ],
+                "last": 160,
+            },
+        }
+        candles = KrakenPublicMarket._parse_payload(
+            "BTC/USD", payload, 20, include_current=True
+        )
+        self.assertEqual(candles[-1].close, 2.5)
 
 
 class LedgerTests(unittest.TestCase):

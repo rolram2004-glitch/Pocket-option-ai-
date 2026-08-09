@@ -4,7 +4,6 @@ import asyncio
 import html
 import logging
 from datetime import UTC, datetime, timedelta
-from urllib.parse import urlparse
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
@@ -19,7 +18,7 @@ from telegram.ext import (
 
 from ai import SignalInterpreter
 from config import Settings
-from market import MarketDataError, TwelveDataMarket, pocket_asset
+from market import KrakenPublicMarket, MarketDataError, TwelveDataMarket, pocket_asset
 from models import Direction, Signal, StrategyMode
 from risk import check_demo_trade
 from store import Store
@@ -42,11 +41,16 @@ STORE = Store(
 AI = SignalInterpreter(
     CONFIG.gemini_api_key, CONFIG.gemini_model, CONFIG.default_expiry_seconds
 )
-MARKET = (
-    TwelveDataMarket(CONFIG.twelve_data_api_key, CONFIG.market_interval)
-    if CONFIG.twelve_data_api_key
-    else None
-)
+if CONFIG.twelve_data_api_key:
+    MARKET = TwelveDataMarket(CONFIG.twelve_data_api_key, CONFIG.market_interval)
+    ACTIVE_SYMBOLS = CONFIG.auto_symbols
+    MARKET_LABEL = "Twelve Data (chiave privata)"
+else:
+    MARKET = KrakenPublicMarket(CONFIG.market_interval)
+    ACTIVE_SYMBOLS = tuple(
+        symbol for symbol in CONFIG.auto_symbols if MARKET.supports(symbol)
+    ) or ("BTC/USD",)
+    MARKET_LABEL = "Kraken pubblico (senza chiave)"
 
 
 def _authorized(chat_id: int) -> bool:
@@ -137,21 +141,13 @@ def _dashboard(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
         f"RSI AUTO: <b>{strategy}</b> • RSI({CONFIG.rsi_period}) "
         f"<b>{CONFIG.rsi_lower:g}/{CONFIG.rsi_upper:g}</b>\n"
         f"Versione RSI: <b>{_mode_label(p.strategy_mode)}</b>\n"
+        f"Feed DEMO: <b>{html.escape(MARKET_LABEL)}</b>\n"
         f"Oggi: <b>{count}</b> trade • P/L chiuso: <b>${pnl:+.2f}</b>\n\n"
         "Inoltra un segnale, per esempio:\n"
-        "<code>EURUSD OTC CALL 1m 87%</code>"
-    )
-    po_url = CONFIG.po_official_telegram_bot_url
-    po_button = (
-        InlineKeyboardButton("🔗 PocketSignals", url=po_url)
-        if po_url and urlparse(po_url).scheme == "https"
-        else InlineKeyboardButton("🔗 PocketSignals", callback_data="po")
+        "<code>BTCUSD CALL 1m 87%</code>"
     )
     keyboard = [
-        [
-            InlineKeyboardButton("🧪 DEMO", callback_data="dash"),
-            po_button,
-        ],
+        [InlineKeyboardButton("🧪 DEMO LOCALE • NESSUN ACCESSO CONTO", callback_data="dash")],
         [
             InlineKeyboardButton(f"🤖 Auto DEMO {auto}", callback_data="auto"),
             InlineKeyboardButton("🧠 Leggi segnale", callback_data="help_signal"),
@@ -302,14 +298,12 @@ async def _place_demo(chat_id: int, signal: Signal, reply) -> None:
 
 
 async def _strategy_cycle(app: Application) -> None:
-    if MARKET is None:
-        return
     chat_ids = STORE.strategy_chat_ids()
     if not chat_ids:
         return
 
     candle_cache = {}
-    for symbol in CONFIG.auto_symbols:
+    for symbol in ACTIVE_SYMBOLS:
         try:
             candle_cache[symbol] = await MARKET.candles(
                 symbol, outputsize=max(60, CONFIG.rsi_period * 6)
@@ -397,13 +391,11 @@ async def _strategy_cycle(app: Application) -> None:
 
 
 async def _settle_due_strategy_trades(app: Application) -> None:
-    if MARKET is None:
-        return
     now = datetime.now(UTC).isoformat(timespec="seconds")
     due = STORE.due_demo_trades(now)
     if not due:
         return
-    symbol_map = {pocket_asset(symbol): symbol for symbol in CONFIG.auto_symbols}
+    symbol_map = {pocket_asset(symbol): symbol for symbol in ACTIVE_SYMBOLS}
     price_cache: dict[str, float] = {}
     for trade in due:
         symbol = symbol_map.get(trade.asset)
@@ -454,11 +446,12 @@ async def strategy_worker(app: Application) -> None:
 
 
 async def post_init(app: Application) -> None:
-    if MARKET is not None:
-        app.create_task(strategy_worker(app), name="rsi-auto-strategy")
-        log.info("RSI automatic strategy worker enabled")
-    else:
-        log.info("RSI worker ready but TWELVE_DATA_API_KEY is not configured")
+    app.create_task(strategy_worker(app), name="rsi-auto-strategy")
+    log.info(
+        "RSI automatic strategy worker enabled: %s (%s)",
+        MARKET_LABEL,
+        ", ".join(ACTIVE_SYMBOLS),
+    )
 
 
 async def settle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -505,21 +498,11 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     data = query.data or ""
 
     if data == "po":
-        url = CONFIG.po_official_telegram_bot_url
-        extra = ""
-        keyboard = None
-        if url and urlparse(url).scheme == "https":
-            keyboard = InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Apri PocketSignals in Telegram ↗", url=url)]]
-            )
-            extra = "\n\n✅ Premi il pulsante qui sotto: non apre il sito web."
         await query.message.reply_text(
-            "🔗 <b>POCKETSIGNALS</b>\n\n"
-            "Ho eliminato il passaggio dal sito. Il pulsante apre direttamente il bot "
-            "Telegram PocketSignals: premi Avvia e segui la sua procedura di collegamento.\n\n"
-            "La strategia personalizzata RSI resta separata e in DEMO finché Pocket Option "
-            "non fornisce un'integrazione ufficiale per segnali esterni." + extra,
-            reply_markup=keyboard,
+            "🔒 <b>COLLEGAMENTO RIMOSSO</b>\n\n"
+            "Questo bot non chiede password, cookie o SSID Pocket Option e non dichiara "
+            "un accesso al conto che non possiede. Usa /start per aprire il nuovo pannello "
+            "DEMO senza collegamento esterno.",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -536,8 +519,7 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     if data == "strategy_info":
-        feed = "✅ configurato" if MARKET is not None else "⚠️ chiave feed mancante"
-        symbols = ", ".join(CONFIG.auto_symbols)
+        symbols = ", ".join(ACTIVE_SYMBOLS)
         await query.message.reply_text(
             "📈 <b>STRATEGIA RSI AUTOMATICA</b>\n\n"
             f"RSI: <b>{CONFIG.rsi_period}</b> periodi\n"
@@ -548,7 +530,8 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "<b>ENTRAMBE DEMO</b>: apre le due versioni insieme e confronta i risultati.\n"
             "Il segnale scatta una sola volta quando l'RSI entra nella zona estrema.\n"
             f"Mercati: <b>{html.escape(symbols)}</b>\n"
-            f"Feed: {feed}\n\n"
+            f"Feed: <b>{html.escape(MARKET_LABEL)}</b>\n"
+            "Senza chiave personale il feed automatico è crypto e non replica i prezzi OTC di Pocket Option.\n\n"
             "L'RSI non è una percentuale di probabilità: il bot non trasforma il valore RSI in una promessa di vincita.",
             parse_mode=ParseMode.HTML,
         )
@@ -579,12 +562,6 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if data == "auto":
         STORE.set_value(chat_id, "auto_demo", not p.auto_demo)
     elif data == "strategy":
-        if MARKET is None:
-            await query.message.reply_text(
-                "⚠️ Per accendere RSI AUTO serve TWELVE_DATA_API_KEY nel file .env. "
-                "Senza candele reali non genero segnali finti."
-            )
-            return
         STORE.set_value(chat_id, "strategy_on", not p.strategy_on)
     elif data == "strategy_mode":
         next_mode = _cycle(
