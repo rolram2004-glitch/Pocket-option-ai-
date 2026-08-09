@@ -202,6 +202,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _guard(update):
         return
     assert update.effective_chat and update.effective_message
+    STORE.activate_dual_demo(update.effective_chat.id)
     # Telegram keeps URL buttons inside messages already sent. The Bot API
     # cannot search chat history by text, so on /start we remove the most
     # recent messages that were sent by this bot. Attempts against user
