@@ -39,8 +39,8 @@ class Store:
                     expiry_seconds INTEGER NOT NULL,
                     min_confidence REAL NOT NULL,
                     auto_demo INTEGER NOT NULL DEFAULT 0,
-                    strategy_on INTEGER NOT NULL DEFAULT 0,
-                    strategy_mode TEXT NOT NULL DEFAULT 'NORMALE',
+                    strategy_on INTEGER NOT NULL DEFAULT 1,
+                    strategy_mode TEXT NOT NULL DEFAULT 'CONFRONTO',
                     stopped INTEGER NOT NULL DEFAULT 0
                 );
 
@@ -108,8 +108,9 @@ class Store:
             conn.execute(
                 """
                 INSERT OR IGNORE INTO profiles
-                (chat_id, demo_balance, trade_amount, expiry_seconds, min_confidence)
-                VALUES (?, ?, ?, ?, ?)
+                (chat_id, demo_balance, trade_amount, expiry_seconds, min_confidence,
+                 strategy_on, strategy_mode)
+                VALUES (?, ?, ?, ?, ?, 1, 'CONFRONTO')
                 """,
                 (
                     chat_id,
@@ -154,6 +155,19 @@ class Store:
             conn.execute(
                 f"UPDATE profiles SET {field} = ? WHERE chat_id = ?",  # field is allowlisted
                 (int(value) if isinstance(value, bool) else value, chat_id),
+            )
+        return self.get_profile(chat_id)
+
+    def activate_dual_demo(self, chat_id: int) -> Profile:
+        """Enable both RSI DEMO variants without overriding the kill switch."""
+        self.get_profile(chat_id)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE profiles SET strategy_on = 1, strategy_mode = 'CONFRONTO'
+                WHERE chat_id = ?
+                """,
+                (chat_id,),
             )
         return self.get_profile(chat_id)
 
