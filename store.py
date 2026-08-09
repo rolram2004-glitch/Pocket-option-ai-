@@ -164,7 +164,8 @@ class Store:
         with self._connect() as conn:
             conn.execute(
                 """
-                UPDATE profiles SET strategy_on = 1, strategy_mode = 'CONFRONTO'
+                UPDATE profiles
+                SET auto_demo = 1, strategy_on = 1, strategy_mode = 'CONFRONTO'
                 WHERE chat_id = ?
                 """,
                 (chat_id,),

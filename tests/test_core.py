@@ -151,6 +151,7 @@ class LedgerTests(unittest.TestCase):
         self.store.set_value(123, "strategy_on", False)
         self.store.set_value(123, "strategy_mode", StrategyMode.NORMAL.value)
         profile = self.store.activate_dual_demo(123)
+        self.assertTrue(profile.auto_demo)
         self.assertTrue(profile.strategy_on)
         self.assertEqual(profile.strategy_mode, StrategyMode.COMPARE)
 
