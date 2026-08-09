@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 
 from models import Candle, Direction
 
@@ -44,6 +45,65 @@ class RsiDecision:
     previous_rsi: float
     candle_time: str
     entry_price: float
+
+
+class RsiLevel(str, Enum):
+    UPPER = "ALTA"
+    LOWER = "BASSA"
+
+
+@dataclass(frozen=True)
+class RsiLevelDecision:
+    level: RsiLevel
+    rsi: float
+    previous_rsi: float
+    candle_time: str
+    entry_price: float
+
+
+def direction_for_rsi_level(level: RsiLevel, inverse: bool = False) -> Direction:
+    """Map an RSI threshold event to the requested normal/inverse direction.
+
+    Normal: upper 86 -> CALL/BUY and lower 14 -> PUT/SELL.
+    Inverse: upper 86 -> PUT/SELL and lower 14 -> CALL/BUY.
+    """
+    normal = Direction.CALL if level is RsiLevel.UPPER else Direction.PUT
+    if not inverse:
+        return normal
+    return Direction.PUT if normal is Direction.CALL else Direction.CALL
+
+
+def rsi_level_cross_signal(
+    candles: list[Candle], period: int, lower: float, upper: float
+) -> RsiLevelDecision | None:
+    """Emit once when RSI enters one of the configured extreme zones.
+
+    Crossing is used instead of checking only the current value so an RSI that
+    remains above 86 or below 14 cannot create duplicate orders every poll.
+    """
+    if len(candles) < period + 3:
+        return None
+    values = rsi_series([c.close for c in candles], period)
+    previous, current = values[-2], values[-1]
+    if previous is None or current is None:
+        return None
+    if previous < upper <= current:
+        return RsiLevelDecision(
+            RsiLevel.UPPER,
+            current,
+            previous,
+            candles[-1].timestamp,
+            candles[-1].close,
+        )
+    if previous > lower >= current:
+        return RsiLevelDecision(
+            RsiLevel.LOWER,
+            current,
+            previous,
+            candles[-1].timestamp,
+            candles[-1].close,
+        )
+    return None
 
 
 def rsi_reentry_signal(
