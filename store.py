@@ -4,7 +4,7 @@ import sqlite3
 import uuid
 from datetime import UTC, datetime
 
-from models import Direction, Profile, Signal, Trade
+from models import Direction, Profile, Signal, StrategyMode, Trade
 
 
 class Store:
@@ -40,6 +40,7 @@ class Store:
                     min_confidence REAL NOT NULL,
                     auto_demo INTEGER NOT NULL DEFAULT 0,
                     strategy_on INTEGER NOT NULL DEFAULT 0,
+                    strategy_mode TEXT NOT NULL DEFAULT 'NORMALE',
                     stopped INTEGER NOT NULL DEFAULT 0
                 );
 
@@ -54,6 +55,7 @@ class Store:
                     status TEXT NOT NULL,
                     pnl REAL NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
+                    strategy_variant TEXT,
                     entry_price REAL,
                     exit_price REAL,
                     expiry_at TEXT
@@ -78,6 +80,10 @@ class Store:
                 conn.execute(
                     "ALTER TABLE profiles ADD COLUMN strategy_on INTEGER NOT NULL DEFAULT 0"
                 )
+            if "strategy_mode" not in profile_cols:
+                conn.execute(
+                    "ALTER TABLE profiles ADD COLUMN strategy_mode TEXT NOT NULL DEFAULT 'NORMALE'"
+                )
             trade_cols = {
                 row[1] for row in conn.execute("PRAGMA table_info(trades)").fetchall()
             }
@@ -85,6 +91,7 @@ class Store:
                 ("entry_price", "REAL"),
                 ("exit_price", "REAL"),
                 ("expiry_at", "TEXT"),
+                ("strategy_variant", "TEXT"),
             ):
                 if column not in trade_cols:
                     conn.execute(f"ALTER TABLE trades ADD COLUMN {column} {definition}")
@@ -117,16 +124,20 @@ class Store:
             min_confidence=row["min_confidence"],
             auto_demo=bool(row["auto_demo"]),
             strategy_on=bool(row["strategy_on"]),
+            strategy_mode=StrategyMode(row["strategy_mode"]),
             stopped=bool(row["stopped"]),
         )
 
-    def set_value(self, chat_id: int, field: str, value: float | int | bool) -> Profile:
+    def set_value(
+        self, chat_id: int, field: str, value: float | int | bool | str
+    ) -> Profile:
         allowed = {
             "trade_amount",
             "expiry_seconds",
             "min_confidence",
             "auto_demo",
             "strategy_on",
+            "strategy_mode",
             "stopped",
         }
         if field not in allowed:
@@ -159,6 +170,7 @@ class Store:
         signal: Signal,
         entry_price: float | None = None,
         expiry_at: str | None = None,
+        strategy_variant: str | None = None,
     ) -> Trade:
         profile = self.get_profile(chat_id)
         if profile.demo_balance < profile.trade_amount:
@@ -175,8 +187,9 @@ class Store:
                 """
                 INSERT INTO trades
                 (trade_id, chat_id, asset, direction, amount, expiry_seconds,
-                 confidence, status, pnl, created_at, entry_price, expiry_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', 0, ?, ?, ?)
+                 confidence, status, pnl, created_at, strategy_variant,
+                 entry_price, expiry_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', 0, ?, ?, ?, ?)
                 """,
                 (
                     trade_id,
@@ -187,6 +200,7 @@ class Store:
                     signal.expiry_seconds,
                     signal.confidence,
                     created_at,
+                    strategy_variant,
                     entry_price,
                     expiry_at,
                 ),
@@ -300,6 +314,7 @@ class Store:
             status=row["status"],
             pnl=row["pnl"],
             created_at=row["created_at"],
+            strategy_variant=row["strategy_variant"],
             entry_price=row["entry_price"],
             exit_price=row["exit_price"],
             expiry_at=row["expiry_at"],

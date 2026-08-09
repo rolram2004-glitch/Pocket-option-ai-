@@ -9,6 +9,12 @@ class Direction(str, Enum):
     PUT = "PUT"
 
 
+class StrategyMode(str, Enum):
+    NORMAL = "NORMALE"
+    INVERSE = "INVERSA"
+    COMPARE = "CONFRONTO"
+
+
 @dataclass(frozen=True)
 class Candle:
     timestamp: str
@@ -36,6 +42,7 @@ class Profile:
     min_confidence: float
     auto_demo: bool
     strategy_on: bool
+    strategy_mode: StrategyMode
     stopped: bool
 
 
@@ -51,6 +58,7 @@ class Trade:
     status: str
     pnl: float
     created_at: str
+    strategy_variant: str | None = None
     entry_price: float | None = None
     exit_price: float | None = None
     expiry_at: str | None = None

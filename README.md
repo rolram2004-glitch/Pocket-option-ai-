@@ -15,6 +15,8 @@ eseguito in locale o come worker su Railway.
 - chiusura di collaudo `WIN / LOSS / TIE` senza inventare risultati;
 - **RSI AUTO**: scarica candele reali, calcola Wilder RSI e apre/chiude i trade
   DEMO automaticamente;
+- selettore **NORMALE / INVERSA / CONFRONTO** per provare le due direzioni con
+  lo stesso evento RSI;
 - anti-duplicazione: una stessa candela RSI non può aprire due volte lo stesso
   segnale, anche dopo un riavvio;
 - pulsante/istruzioni per aprire il bot Telegram ufficiale di Pocket Option.
@@ -27,15 +29,16 @@ La configurazione iniziale è intenzionalmente semplice e modificabile:
 - `RSI_LOWER=14`
 - `RSI_UPPER=86`
 - importo DEMO iniziale: `$0.60` (modificabile dal pannello Telegram);
-- **CALL** quando l'RSI era sotto 14 e rientra sopra 14;
-- **PUT** quando l'RSI era sopra 86 e rientra sotto 86;
+- **NORMALE**: ingresso in zona 86 → `CALL/BUY`; ingresso in zona 14 → `PUT/SELL`;
+- **INVERSA**: ingresso in zona 86 → `PUT/SELL`; ingresso in zona 14 → `CALL/BUY`;
+- **CONFRONTO**: registra entrambe le versioni in parallelo nel ledger DEMO;
 - una sola decisione per candela;
 - esecuzione automatica solo sul ledger DEMO locale;
 - chiusura automatica alla scadenza usando di nuovo il prezzo reale del feed.
 
-Il rientro dalla zona estrema è usato al posto del semplice `RSI >= 86` o
-`RSI <= 14`, perché restare in zona estrema per più candele non deve creare una
-raffica di ordini duplicati.
+La decisione scatta quando l'RSI attraversa la soglia ed entra nella zona
+estrema. Il controllo dell'attraversamento evita che un RSI fermo sopra 86 o
+sotto 14 crei una raffica di ordini duplicati.
 
 Per accenderla imposta `TWELVE_DATA_API_KEY` e premi **📡 RSI AUTO** in Telegram.
 I simboli iniziali sono `EUR/USD;GBP/USD;BTC/USD` e si cambiano con
@@ -52,13 +55,20 @@ afferma inoltre che automazioni esterne non approvate possono violare le sue
 condizioni. Per questo il progetto **non** contiene cookie, SSID, WebSocket
 privati, reverse engineering o una falsa "API Pocket Option".
 
-La voce `PO_OFFICIAL_TELEGRAM_BOT_URL` serve solo per il link ufficiale che viene
-mostrato nel proprio account Pocket Option (Help → Applications → Telegram Bot).
+Il pulsante **Collega Pocket Option** apre la pagina autenticata ufficiale
+`https://pocketoption.com/cabinet/telegram/link`. La voce
+`PO_OFFICIAL_TELEGRAM_BOT_URL` permette di sostituire il link se Pocket Option
+lo modifica.
 
 Il ledger chiamato "DEMO locale" è volutamente distinto dal conto DEMO di
 Pocket Option. Per far eseguire gli ordini sul **DEMO Pocket Option vero** bisogna
 usare l'integrazione ufficiale fornita da Pocket Option oppure una API ufficiale
 documentata/abilitata per il proprio account.
+
+Il collegamento ufficiale associa l'account al **bot di Pocket Option**, non
+consegna credenziali o permessi di trading a questo bot personalizzato. Perciò il
+progetto non dichiara falsamente che le strategie personalizzate siano eseguite
+nel conto Pocket Option.
 
 ## Avvio in 5 minuti
 

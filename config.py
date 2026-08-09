@@ -75,7 +75,8 @@ class Settings:
             rsi_lower=_float("RSI_LOWER", 14.0),
             rsi_upper=_float("RSI_UPPER", 86.0),
             po_official_telegram_bot_url=os.getenv(
-                "PO_OFFICIAL_TELEGRAM_BOT_URL", ""
+                "PO_OFFICIAL_TELEGRAM_BOT_URL",
+                "https://pocketoption.com/cabinet/telegram/link",
             ).strip()
             or None,
             database_path=os.getenv("DATABASE_PATH", "pocket_ai.sqlite3").strip(),

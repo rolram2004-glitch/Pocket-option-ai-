@@ -20,10 +20,10 @@ from telegram.ext import (
 from ai import SignalInterpreter
 from config import Settings
 from market import MarketDataError, TwelveDataMarket, pocket_asset
-from models import Direction, Signal
+from models import Direction, Signal, StrategyMode
 from risk import check_demo_trade
 from store import Store
-from strategy import rsi_reentry_signal
+from strategy import RsiLevel, direction_for_rsi_level, rsi_level_cross_signal
 
 
 logging.basicConfig(
@@ -66,6 +66,18 @@ def _fmt_expiry(seconds: int) -> str:
     return f"{seconds // 60}m" if seconds % 60 == 0 else f"{seconds}s"
 
 
+def _strategy_variants(
+    mode: StrategyMode, level: RsiLevel
+) -> list[tuple[StrategyMode, Direction]]:
+    normal = (StrategyMode.NORMAL, direction_for_rsi_level(level, inverse=False))
+    inverse = (StrategyMode.INVERSE, direction_for_rsi_level(level, inverse=True))
+    if mode is StrategyMode.NORMAL:
+        return [normal]
+    if mode is StrategyMode.INVERSE:
+        return [inverse]
+    return [normal, inverse]
+
+
 def _dashboard(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
     p = STORE.get_profile(chat_id)
     count, pnl = STORE.daily_stats(chat_id)
@@ -82,6 +94,7 @@ def _dashboard(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
         f"Filtro: <b>{p.min_confidence:.0f}%</b> • Auto DEMO: <b>{auto}</b>\n"
         f"RSI AUTO: <b>{strategy}</b> • RSI({CONFIG.rsi_period}) "
         f"<b>{CONFIG.rsi_lower:g}/{CONFIG.rsi_upper:g}</b>\n"
+        f"Versione RSI: <b>{p.strategy_mode.value}</b>\n"
         f"Oggi: <b>{count}</b> trade • P/L chiuso: <b>${pnl:+.2f}</b>\n\n"
         "Inoltra un segnale, per esempio:\n"
         "<code>EURUSD OTC CALL 1m 87%</code>"
@@ -97,8 +110,11 @@ def _dashboard(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
         ],
         [
             InlineKeyboardButton(f"📡 RSI AUTO {strategy}", callback_data="strategy"),
-            InlineKeyboardButton("📈 Strategia", callback_data="strategy_info"),
+            InlineKeyboardButton(
+                f"🔁 {p.strategy_mode.value}", callback_data="strategy_mode"
+            ),
         ],
+        [InlineKeyboardButton("📈 Regole RSI", callback_data="strategy_info")],
         [
             InlineKeyboardButton(f"💵 ${p.trade_amount:g}", callback_data="amount"),
             InlineKeyboardButton(f"⏱ {_fmt_expiry(p.expiry_seconds)}", callback_data="expiry"),
@@ -239,7 +255,7 @@ async def _strategy_cycle(app: Application) -> None:
     for chat_id in chat_ids:
         p = STORE.get_profile(chat_id)
         for symbol, candles in candle_cache.items():
-            decision = rsi_reentry_signal(
+            decision = rsi_level_cross_signal(
                 candles,
                 CONFIG.rsi_period,
                 CONFIG.rsi_lower,
@@ -248,43 +264,71 @@ async def _strategy_cycle(app: Application) -> None:
             if decision is None:
                 continue
             asset = pocket_asset(symbol)
-            signal = Signal(
+            variants = _strategy_variants(p.strategy_mode, decision.level)
+            normal_direction = direction_for_rsi_level(decision.level, inverse=False)
+            probe = Signal(
                 asset=asset,
-                direction=decision.direction,
+                direction=variants[0][1],
                 expiry_seconds=p.expiry_seconds,
                 confidence=None,
                 raw_text=f"RSI({CONFIG.rsi_period})={decision.rsi:.2f}",
             )
-            allowed, reason = check_demo_trade(CONFIG, STORE, p, signal)
+            allowed, reason = check_demo_trade(CONFIG, STORE, p, probe)
             if not allowed:
-                log.info("Strategy trade blocked chat=%s: %s", chat_id, reason)
+                log.info("Strategy event blocked chat=%s: %s", chat_id, reason)
                 continue
             if not STORE.claim_strategy_event(
-                chat_id, asset, decision.candle_time, decision.direction
+                chat_id, asset, decision.candle_time, normal_direction
             ):
                 continue
 
             expiry_at = (
                 datetime.now(UTC) + timedelta(seconds=p.expiry_seconds)
             ).isoformat(timespec="seconds")
-            trade = STORE.create_demo_trade(
-                chat_id,
-                signal,
-                entry_price=decision.entry_price,
-                expiry_at=expiry_at,
-            )
-            await app.bot.send_message(
-                chat_id,
-                "📡 <b>RSI AUTO • DEMO</b>\n"
-                f"{html.escape(asset)} • <b>{decision.direction.value}</b>\n"
-                f"RSI({CONFIG.rsi_period}): {decision.previous_rsi:.2f} → "
-                f"<b>{decision.rsi:.2f}</b>\n"
-                f"Entry feed: <b>{decision.entry_price:g}</b>\n"
-                f"Scadenza: <b>{_fmt_expiry(p.expiry_seconds)}</b>\n"
-                f"Stake virtuale: <b>${trade.amount:g}</b>\n"
-                f"ID: <code>{trade.trade_id}</code>",
-                parse_mode=ParseMode.HTML,
-            )
+            for variant, direction in variants:
+                signal = Signal(
+                    asset=asset,
+                    direction=direction,
+                    expiry_seconds=p.expiry_seconds,
+                    confidence=None,
+                    raw_text=(
+                        f"RSI({CONFIG.rsi_period})={decision.rsi:.2f} "
+                        f"{variant.value}"
+                    ),
+                )
+                current_profile = STORE.get_profile(chat_id)
+                allowed, reason = check_demo_trade(
+                    CONFIG, STORE, current_profile, signal
+                )
+                if not allowed:
+                    log.info(
+                        "Strategy trade blocked chat=%s variant=%s: %s",
+                        chat_id,
+                        variant.value,
+                        reason,
+                    )
+                    continue
+                trade = STORE.create_demo_trade(
+                    chat_id,
+                    signal,
+                    entry_price=decision.entry_price,
+                    expiry_at=expiry_at,
+                    strategy_variant=variant.value,
+                )
+                await app.bot.send_message(
+                    chat_id,
+                    "📡 <b>RSI AUTO • DEMO</b>\n"
+                    f"Versione: <b>{variant.value}</b>\n"
+                    f"Zona RSI: <b>{decision.level.value}</b>\n"
+                    f"{html.escape(asset)} • <b>{direction.value}</b>\n"
+                    f"RSI({CONFIG.rsi_period}): {decision.previous_rsi:.2f} → "
+                    f"<b>{decision.rsi:.2f}</b>\n"
+                    f"Entry feed: <b>{decision.entry_price:g}</b>\n"
+                    f"Scadenza: <b>{_fmt_expiry(p.expiry_seconds)}</b>\n"
+                    f"Stake virtuale: <b>${trade.amount:g}</b>\n"
+                    f"ID: <code>{trade.trade_id}</code>",
+                    parse_mode=ParseMode.HTML,
+                )
 
 
 async def _settle_due_strategy_trades(app: Application) -> None:
@@ -324,6 +368,7 @@ async def _settle_due_strategy_trades(app: Application) -> None:
         await app.bot.send_message(
             trade.chat_id,
             "🏁 <b>RSI AUTO • RISULTATO DEMO</b>\n"
+            f"Versione: <b>{html.escape(trade.strategy_variant or 'MANUALE')}</b>\n"
             f"{html.escape(trade.asset)} • {trade.direction.value}\n"
             f"{trade.entry_price:g} → <b>{exit_price:g}</b>\n"
             f"Esito: <b>{closed.status}</b> • P/L virtuale <b>${closed.pnl:+.2f}</b>",
@@ -400,15 +445,17 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         keyboard = None
         if url and urlparse(url).scheme == "https":
             keyboard = InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Apri bot ufficiale ↗", url=url)]]
+                [[InlineKeyboardButton("Accedi e collega il conto ↗", url=url)]]
             )
-            extra = "\n\n✅ Link ufficiale configurato nel progetto."
+            extra = "\n\n✅ Collegamento ufficiale pronto nel pulsante qui sotto."
         await query.message.reply_text(
             "🔗 <b>COLLEGAMENTO POCKET OPTION</b>\n\n"
-            "Per l'esecuzione sul conto Pocket Option usa il collegamento ufficiale: "
-            "Pocket Option → Help → Applications → Telegram Bot → collega l'account.\n\n"
-            "Da lì Pocket Option permette DEMO/REAL e Auto-trade. Questo progetto non usa "
-            "API private, cookie o websocket non approvati." + extra,
+            "Accedi con il tuo account Pocket Option e collega il Telegram Signal Bot "
+            "ufficiale. Nelle sue impostazioni puoi scegliere DEMO/REAL, importo e Auto-trade.\n\n"
+            "Nota: Pocket Option non fornisce a questo bot personalizzato un'API pubblica "
+            "documentata per eseguire la nostra strategia. Il pulsante collega il conto al "
+            "bot ufficiale Pocket Option; qui RSI resta in prova DEMO e non vengono richieste "
+            "password, cookie o codici del conto." + extra,
             reply_markup=keyboard,
             parse_mode=ParseMode.HTML,
         )
@@ -433,8 +480,10 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"RSI: <b>{CONFIG.rsi_period}</b> periodi\n"
             f"Zona bassa: <b>{CONFIG.rsi_lower:g}</b>\n"
             f"Zona alta: <b>{CONFIG.rsi_upper:g}</b>\n"
-            "CALL: RSI rientra verso l'alto dalla zona bassa.\n"
-            "PUT: RSI rientra verso il basso dalla zona alta.\n"
+            "<b>NORMALE</b>: RSI 86 → CALL/BUY; RSI 14 → PUT/SELL.\n"
+            "<b>INVERSA</b>: RSI 86 → PUT/SELL; RSI 14 → CALL/BUY.\n"
+            "<b>CONFRONTO</b>: apre entrambe le versioni solo in DEMO.\n"
+            "Il segnale scatta una sola volta quando l'RSI entra nella zona estrema.\n"
             f"Mercati: <b>{html.escape(symbols)}</b>\n"
             f"Feed: {feed}\n\n"
             "L'RSI non è una percentuale di probabilità: il bot non trasforma il valore RSI in una promessa di vincita.",
@@ -449,9 +498,10 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return
         lines = ["<b>ULTIMI TRADE DEMO</b>"]
         for t in trades:
+            variant = html.escape(t.strategy_variant or "MANUALE")
             lines.append(
                 f"<code>{t.trade_id}</code> {html.escape(t.asset)} {t.direction.value} "
-                f"${t.amount:g} • {t.status} • ${t.pnl:+.2f}"
+                f"[{variant}] ${t.amount:g} • {t.status} • ${t.pnl:+.2f}"
             )
         await query.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
         return
@@ -467,6 +517,12 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
         STORE.set_value(chat_id, "strategy_on", not p.strategy_on)
+    elif data == "strategy_mode":
+        next_mode = _cycle(
+            p.strategy_mode,
+            [StrategyMode.NORMAL, StrategyMode.INVERSE, StrategyMode.COMPARE],
+        )
+        STORE.set_value(chat_id, "strategy_mode", next_mode.value)
     elif data == "amount":
         STORE.set_value(
             chat_id,
