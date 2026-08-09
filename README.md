@@ -103,6 +103,7 @@ generane una nuova.
 
 - `/start` — dashboard
 - `/status` — stato e parametri
+- `/version` — conferma che è attiva la release senza collegamenti esterni
 - `/signal EURUSD CALL 1m 85%` — interpreta un segnale
 - `/settle ID WIN` — chiude manualmente un trade DEMO di collaudo
 
