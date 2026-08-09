@@ -301,6 +301,45 @@ class Store:
             ).fetchall()
         return [self._row_to_trade(row) for row in rows]
 
+    def strategy_comparison(self, chat_id: int) -> dict[str, dict[str, float | int]]:
+        """Return all-time closed DEMO results split by RSI strategy variant."""
+        result: dict[str, dict[str, float | int]] = {}
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT strategy_variant,
+                       COUNT(*) AS closed,
+                       SUM(CASE WHEN status = 'WIN' THEN 1 ELSE 0 END) AS wins,
+                       SUM(CASE WHEN status = 'LOSS' THEN 1 ELSE 0 END) AS losses,
+                       SUM(CASE WHEN status = 'TIE' THEN 1 ELSE 0 END) AS ties,
+                       COALESCE(SUM(pnl), 0) AS pnl
+                FROM trades
+                WHERE chat_id = ?
+                  AND strategy_variant IN ('NORMALE', 'INVERSA')
+                  AND status IN ('WIN', 'LOSS', 'TIE')
+                GROUP BY strategy_variant
+                """,
+                (chat_id,),
+            ).fetchall()
+        for variant in (StrategyMode.NORMAL.value, StrategyMode.INVERSE.value):
+            row = next(
+                (item for item in rows if item["strategy_variant"] == variant), None
+            )
+            closed = int(row["closed"]) if row else 0
+            wins = int(row["wins"]) if row else 0
+            losses = int(row["losses"]) if row else 0
+            ties = int(row["ties"]) if row else 0
+            decided = wins + losses
+            result[variant] = {
+                "closed": closed,
+                "wins": wins,
+                "losses": losses,
+                "ties": ties,
+                "win_rate": (wins / decided * 100.0) if decided else 0.0,
+                "pnl": float(row["pnl"]) if row else 0.0,
+            }
+        return result
+
     @staticmethod
     def _row_to_trade(row: sqlite3.Row) -> Trade:
         return Trade(
