@@ -15,8 +15,10 @@ eseguito in locale o come worker su Railway.
 - chiusura di collaudo `WIN / LOSS / TIE` senza inventare risultati;
 - **RSI AUTO**: scarica candele reali, calcola Wilder RSI e apre/chiude i trade
   DEMO automaticamente;
-- selettore **NORMALE / INVERSA / CONFRONTO** per provare le due direzioni con
+- pulsanti **NORMALE / INVERSA / ENTRAMBE DEMO** per provare le due direzioni con
   lo stesso evento RSI;
+- classifica separata con trade chiusi, WIN, LOSS, pareggi, win rate e P/L di
+  ogni versione;
 - anti-duplicazione: una stessa candela RSI non può aprire due volte lo stesso
   segnale, anche dopo un riavvio;
 - pulsante/istruzioni per aprire il bot Telegram ufficiale di Pocket Option.
@@ -31,7 +33,7 @@ La configurazione iniziale è intenzionalmente semplice e modificabile:
 - importo DEMO iniziale: `$0.60` (modificabile dal pannello Telegram);
 - **NORMALE**: ingresso in zona 86 → `CALL/BUY`; ingresso in zona 14 → `PUT/SELL`;
 - **INVERSA**: ingresso in zona 86 → `PUT/SELL`; ingresso in zona 14 → `CALL/BUY`;
-- **CONFRONTO**: registra entrambe le versioni in parallelo nel ledger DEMO;
+- **ENTRAMBE DEMO**: registra entrambe le versioni in parallelo nel ledger DEMO;
 - una sola decisione per candela;
 - esecuzione automatica solo sul ledger DEMO locale;
 - chiusura automatica alla scadenza usando di nuovo il prezzo reale del feed.
@@ -55,10 +57,9 @@ afferma inoltre che automazioni esterne non approvate possono violare le sue
 condizioni. Per questo il progetto **non** contiene cookie, SSID, WebSocket
 privati, reverse engineering o una falsa "API Pocket Option".
 
-Il pulsante **Collega Pocket Option** apre la pagina autenticata ufficiale
-`https://pocketoption.com/cabinet/telegram/link`. La voce
-`PO_OFFICIAL_TELEGRAM_BOT_URL` permette di sostituire il link se Pocket Option
-lo modifica.
+Il pulsante **PocketSignals** apre direttamente `https://t.me/PocketSignals` in
+Telegram, senza passare dal sito Pocket Option. La voce
+`PO_OFFICIAL_TELEGRAM_BOT_URL` permette di sostituire il collegamento se cambia.
 
 Il ledger chiamato "DEMO locale" è volutamente distinto dal conto DEMO di
 Pocket Option. Per far eseguire gli ordini sul **DEMO Pocket Option vero** bisogna
