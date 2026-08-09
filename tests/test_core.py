@@ -153,6 +153,11 @@ class LedgerTests(unittest.TestCase):
             123, signal, strategy_variant=StrategyMode.INVERSE.value
         )
         self.assertEqual(trade.strategy_variant, StrategyMode.INVERSE.value)
+        self.assertEqual(self.store.get_profile(123).demo_balance, 1000)
+        self.assertEqual(
+            self.store.strategy_ledger_balance(123, StrategyMode.INVERSE.value),
+            999,
+        )
 
     def test_strategy_comparison_splits_results(self):
         normal_signal = parse_signal("EURUSD CALL 1m 90%")
@@ -172,6 +177,11 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(stats[StrategyMode.INVERSE.value]["losses"], 1)
         self.assertAlmostEqual(stats[StrategyMode.NORMAL.value]["pnl"], 0.82)
         self.assertAlmostEqual(stats[StrategyMode.INVERSE.value]["pnl"], -1.0)
+        self.assertAlmostEqual(
+            stats[StrategyMode.NORMAL.value]["balance"], 1000.82
+        )
+        self.assertAlmostEqual(stats[StrategyMode.INVERSE.value]["balance"], 999.0)
+        self.assertEqual(self.store.get_profile(123).demo_balance, 1000)
 
 
 if __name__ == "__main__":
