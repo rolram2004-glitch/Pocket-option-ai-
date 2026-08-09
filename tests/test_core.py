@@ -144,6 +144,16 @@ class LedgerTests(unittest.TestCase):
         self.assertAlmostEqual(trade.pnl, 0.82)
         self.assertAlmostEqual(self.store.get_profile(123).demo_balance, 1000.82)
 
+    def test_dual_demo_is_active_by_default_and_can_be_reactivated(self):
+        profile = self.store.get_profile(123)
+        self.assertTrue(profile.strategy_on)
+        self.assertEqual(profile.strategy_mode, StrategyMode.COMPARE)
+        self.store.set_value(123, "strategy_on", False)
+        self.store.set_value(123, "strategy_mode", StrategyMode.NORMAL.value)
+        profile = self.store.activate_dual_demo(123)
+        self.assertTrue(profile.strategy_on)
+        self.assertEqual(profile.strategy_mode, StrategyMode.COMPARE)
+
     def test_strategy_mode_and_variant_are_persisted(self):
         profile = self.store.set_value(123, "strategy_mode", StrategyMode.INVERSE.value)
         self.assertEqual(profile.strategy_mode, StrategyMode.INVERSE)
