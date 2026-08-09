@@ -8,11 +8,16 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from models import Direction  # noqa: E402
+from models import Candle, Direction, StrategyMode  # noqa: E402
 from parser import parse_signal  # noqa: E402
 from risk import check_demo_trade  # noqa: E402
 from store import Store  # noqa: E402
-from strategy import rsi_series  # noqa: E402
+from strategy import (  # noqa: E402
+    RsiLevel,
+    direction_for_rsi_level,
+    rsi_level_cross_signal,
+    rsi_series,
+)
 
 
 class ParserTests(unittest.TestCase):
@@ -50,6 +55,31 @@ class StrategyTests(unittest.TestCase):
         self.assertTrue(numeric)
         self.assertTrue(all(0 <= value <= 100 for value in numeric))
 
+    def test_normal_and_inverse_mapping(self):
+        self.assertEqual(
+            direction_for_rsi_level(RsiLevel.UPPER), Direction.CALL
+        )
+        self.assertEqual(
+            direction_for_rsi_level(RsiLevel.LOWER), Direction.PUT
+        )
+        self.assertEqual(
+            direction_for_rsi_level(RsiLevel.UPPER, inverse=True), Direction.PUT
+        )
+        self.assertEqual(
+            direction_for_rsi_level(RsiLevel.LOWER, inverse=True), Direction.CALL
+        )
+
+    def test_threshold_cross_emits_only_on_entry(self):
+        closes = [1, 1, 1, 1, 1, 1, 2]
+        candles = [
+            Candle(str(i), close, close, close, close)
+            for i, close in enumerate(closes)
+        ]
+        decision = rsi_level_cross_signal(candles, 3, 14, 86)
+        self.assertIsNotNone(decision)
+        assert decision is not None
+        self.assertEqual(decision.level, RsiLevel.UPPER)
+
 
 class LedgerTests(unittest.TestCase):
     def setUp(self):
@@ -71,6 +101,16 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(trade.status, "WIN")
         self.assertAlmostEqual(trade.pnl, 0.82)
         self.assertAlmostEqual(self.store.get_profile(123).demo_balance, 1000.82)
+
+    def test_strategy_mode_and_variant_are_persisted(self):
+        profile = self.store.set_value(123, "strategy_mode", StrategyMode.INVERSE.value)
+        self.assertEqual(profile.strategy_mode, StrategyMode.INVERSE)
+        signal = parse_signal("EURUSD PUT 1m 90%")
+        assert signal is not None
+        trade = self.store.create_demo_trade(
+            123, signal, strategy_variant=StrategyMode.INVERSE.value
+        )
+        self.assertEqual(trade.strategy_variant, StrategyMode.INVERSE.value)
 
 
 if __name__ == "__main__":
