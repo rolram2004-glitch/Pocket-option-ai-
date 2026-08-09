@@ -5,8 +5,9 @@ import html
 import logging
 from datetime import UTC, datetime, timedelta
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
+from telegram.error import Conflict
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -29,7 +30,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO
 )
 log = logging.getLogger("pocket-ai")
-BOT_RELEASE = "SENZA-LINK-v5"
+BOT_RELEASE = "DUAL-DEMO-v6"
 
 CONFIG = Settings.from_env()
 STORE = Store(
@@ -88,10 +89,10 @@ def _mode_label(mode: StrategyMode) -> str:
 
 
 def _comparison_card(chat_id: int) -> str:
-    stats = STORE.strategy_comparison(chat_id)
+    stats = STORE.strategy_comparison(chat_id, days=7)
     amount = STORE.get_profile(chat_id).trade_amount
     lines = [
-        "📊 <b>CONFRONTO STRATEGIE • DEMO</b>",
+        "📊 <b>CONFRONTO STRATEGIE • ULTIMI 7 GIORNI</b>",
         "━━━━━━━━━━━━━━━━━━",
     ]
     for mode in (StrategyMode.NORMAL, StrategyMode.INVERSE):
@@ -103,6 +104,7 @@ def _comparison_card(chat_id: int) -> str:
                 f"Chiusi: <b>{item['closed']}</b> • WIN: <b>{item['wins']}</b> "
                 f"• LOSS: <b>{item['losses']}</b> • TIE: <b>{item['ties']}</b>",
                 f"Win rate: <b>{rate}</b> • P/L: <b>${item['pnl']:+.2f}</b>",
+                f"Saldo separato: <b>${item['balance']:,.2f}</b>",
             ]
         )
 
@@ -127,6 +129,7 @@ def _comparison_card(chat_id: int) -> str:
 
 def _dashboard(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
     p = STORE.get_profile(chat_id)
+    strategy_balances = STORE.strategy_balances(chat_id)
     count, pnl = STORE.daily_stats(chat_id)
     status = "🛑 STOP" if p.stopped else "🟢 ATTIVO"
     auto = "ON" if p.auto_demo else "OFF"
@@ -137,7 +140,9 @@ def _dashboard(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
         f"Versione: ✅ <b>{BOT_RELEASE}</b>\n"
         f"Modalità: 🧪 <b>DEMO locale</b>\n"
         f"Stato: {status}\n"
-        f"Saldo virtuale: <b>${p.demo_balance:,.2f}</b>\n"
+        f"Saldo manuale: <b>${p.demo_balance:,.2f}</b>\n"
+        f"Saldo NORMALE: <b>${strategy_balances[StrategyMode.NORMAL.value]:,.2f}</b>\n"
+        f"Saldo INVERSA: <b>${strategy_balances[StrategyMode.INVERSE.value]:,.2f}</b>\n"
         f"Importo: <b>${p.trade_amount:g}</b> • Scadenza: <b>{_fmt_expiry(p.expiry_seconds)}</b>\n"
         f"Filtro: <b>{p.min_confidence:.0f}%</b> • Auto DEMO: <b>{auto}</b>\n"
         f"RSI AUTO: <b>{strategy}</b> • RSI({CONFIG.rsi_period}) "
@@ -224,6 +229,15 @@ async def version(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(
         f"✅ Versione attiva: {BOT_RELEASE}\n"
         "Nessun pulsante o collegamento esterno è presente in questa versione."
+    )
+
+
+async def results(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _guard(update):
+        return
+    assert update.effective_chat and update.effective_message
+    await update.effective_message.reply_text(
+        _comparison_card(update.effective_chat.id), parse_mode=ParseMode.HTML
     )
 
 
@@ -347,25 +361,7 @@ async def _strategy_cycle(app: Application) -> None:
             asset = pocket_asset(symbol)
             variants = _strategy_variants(p.strategy_mode, decision.level)
             normal_direction = direction_for_rsi_level(decision.level, inverse=False)
-            probe = Signal(
-                asset=asset,
-                direction=variants[0][1],
-                expiry_seconds=p.expiry_seconds,
-                confidence=None,
-                raw_text=f"RSI({CONFIG.rsi_period})={decision.rsi:.2f}",
-            )
-            allowed, reason = check_demo_trade(CONFIG, STORE, p, probe)
-            if not allowed:
-                log.info("Strategy event blocked chat=%s: %s", chat_id, reason)
-                continue
-            if not STORE.claim_strategy_event(
-                chat_id, asset, decision.candle_time, normal_direction
-            ):
-                continue
-
-            expiry_at = (
-                datetime.now(UTC) + timedelta(seconds=p.expiry_seconds)
-            ).isoformat(timespec="seconds")
+            eligible_variants: list[tuple[StrategyMode, Direction, Signal]] = []
             for variant, direction in variants:
                 signal = Signal(
                     asset=asset,
@@ -377,18 +373,33 @@ async def _strategy_cycle(app: Application) -> None:
                         f"{variant.value}"
                     ),
                 )
-                current_profile = STORE.get_profile(chat_id)
                 allowed, reason = check_demo_trade(
-                    CONFIG, STORE, current_profile, signal
+                    CONFIG,
+                    STORE,
+                    p,
+                    signal,
+                    strategy_variant=variant.value,
                 )
-                if not allowed:
+                if allowed:
+                    eligible_variants.append((variant, direction, signal))
+                else:
                     log.info(
                         "Strategy trade blocked chat=%s variant=%s: %s",
                         chat_id,
                         variant.value,
                         reason,
                     )
-                    continue
+            if not eligible_variants:
+                continue
+            if not STORE.claim_strategy_event(
+                chat_id, asset, decision.candle_time, normal_direction
+            ):
+                continue
+
+            expiry_at = (
+                datetime.now(UTC) + timedelta(seconds=p.expiry_seconds)
+            ).isoformat(timespec="seconds")
+            for variant, direction, signal in eligible_variants:
                 trade = STORE.create_demo_trade(
                     chat_id,
                     signal,
@@ -468,9 +479,21 @@ async def strategy_worker(app: Application) -> None:
 
 
 async def post_init(app: Application) -> None:
+    await app.bot.delete_webhook(drop_pending_updates=True)
+    await app.bot.set_my_commands(
+        [
+            BotCommand("start", "Apri il pannello DEMO"),
+            BotCommand("version", "Controlla la versione attiva"),
+            BotCommand("results", "Confronto DEMO degli ultimi 7 giorni"),
+            BotCommand("status", "Stato del bot"),
+        ]
+    )
+    identity = await app.bot.get_me()
     app.create_task(strategy_worker(app), name="rsi-auto-strategy")
     log.info(
-        "RSI automatic strategy worker enabled: %s (%s)",
+        "Telegram ready: @%s release=%s; RSI worker: %s (%s)",
+        identity.username,
+        BOT_RELEASE,
         MARKET_LABEL,
         ", ".join(ACTIVE_SYMBOLS),
     )
@@ -633,6 +656,12 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if isinstance(context.error, Conflict):
+        log.error(
+            "Telegram token in uso da un altro servizio. Scollega ModularBot/altre istanze "
+            "oppure genera un nuovo token BotFather e aggiornalo solo su Railway."
+        )
+        return
     log.exception("Unhandled Telegram update error", exc_info=context.error)
 
 
@@ -647,6 +676,7 @@ def main() -> None:
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("version", version))
+    app.add_handler(CommandHandler("results", results))
     app.add_handler(CommandHandler("signal", signal_command))
     app.add_handler(CommandHandler("settle", settle))
     app.add_handler(CallbackQueryHandler(callback))
