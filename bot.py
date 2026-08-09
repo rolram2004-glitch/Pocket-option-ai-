@@ -78,6 +78,48 @@ def _strategy_variants(
     return [normal, inverse]
 
 
+def _mode_label(mode: StrategyMode) -> str:
+    return "ENTRAMBE DEMO" if mode is StrategyMode.COMPARE else mode.value
+
+
+def _comparison_card(chat_id: int) -> str:
+    stats = STORE.strategy_comparison(chat_id)
+    amount = STORE.get_profile(chat_id).trade_amount
+    lines = [
+        "📊 <b>CONFRONTO STRATEGIE • DEMO</b>",
+        "━━━━━━━━━━━━━━━━━━",
+    ]
+    for mode in (StrategyMode.NORMAL, StrategyMode.INVERSE):
+        item = stats[mode.value]
+        rate = f"{item['win_rate']:.1f}%" if item["closed"] else "—"
+        lines.extend(
+            [
+                f"\n<b>{mode.value}</b>",
+                f"Chiusi: <b>{item['closed']}</b> • WIN: <b>{item['wins']}</b> "
+                f"• LOSS: <b>{item['losses']}</b> • TIE: <b>{item['ties']}</b>",
+                f"Win rate: <b>{rate}</b> • P/L: <b>${item['pnl']:+.2f}</b>",
+            ]
+        )
+
+    normal = stats[StrategyMode.NORMAL.value]
+    inverse = stats[StrategyMode.INVERSE.value]
+    if not normal["closed"] and not inverse["closed"]:
+        winner = "Nessun trade chiuso: attiva ENTRAMBE DEMO e RSI AUTO."
+    elif normal["pnl"] > inverse["pnl"]:
+        winner = "🏆 Migliore finora: NORMALE"
+    elif inverse["pnl"] > normal["pnl"]:
+        winner = "🏆 Migliore finora: INVERSA"
+    else:
+        winner = "🤝 Risultato attuale: PAREGGIO"
+    lines.extend(
+        [
+            f"\n{winner}",
+            f"\nLa modalità ENTRAMBE apre due trade virtuali da ${amount:g} sullo stesso evento RSI; non usa denaro reale.",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def _dashboard(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
     p = STORE.get_profile(chat_id)
     count, pnl = STORE.daily_stats(chat_id)
@@ -94,15 +136,21 @@ def _dashboard(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
         f"Filtro: <b>{p.min_confidence:.0f}%</b> • Auto DEMO: <b>{auto}</b>\n"
         f"RSI AUTO: <b>{strategy}</b> • RSI({CONFIG.rsi_period}) "
         f"<b>{CONFIG.rsi_lower:g}/{CONFIG.rsi_upper:g}</b>\n"
-        f"Versione RSI: <b>{p.strategy_mode.value}</b>\n"
+        f"Versione RSI: <b>{_mode_label(p.strategy_mode)}</b>\n"
         f"Oggi: <b>{count}</b> trade • P/L chiuso: <b>${pnl:+.2f}</b>\n\n"
         "Inoltra un segnale, per esempio:\n"
         "<code>EURUSD OTC CALL 1m 87%</code>"
     )
+    po_url = CONFIG.po_official_telegram_bot_url
+    po_button = (
+        InlineKeyboardButton("🔗 PocketSignals", url=po_url)
+        if po_url and urlparse(po_url).scheme == "https"
+        else InlineKeyboardButton("🔗 PocketSignals", callback_data="po")
+    )
     keyboard = [
         [
             InlineKeyboardButton("🧪 DEMO", callback_data="dash"),
-            InlineKeyboardButton("🔗 Pocket Option", callback_data="po"),
+            po_button,
         ],
         [
             InlineKeyboardButton(f"🤖 Auto DEMO {auto}", callback_data="auto"),
@@ -110,9 +158,26 @@ def _dashboard(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
         ],
         [
             InlineKeyboardButton(f"📡 RSI AUTO {strategy}", callback_data="strategy"),
+        ],
+        [
             InlineKeyboardButton(
-                f"🔁 {p.strategy_mode.value}", callback_data="strategy_mode"
+                ("✅ " if p.strategy_mode is StrategyMode.NORMAL else "")
+                + "NORMALE",
+                callback_data="mode_normal",
             ),
+            InlineKeyboardButton(
+                ("✅ " if p.strategy_mode is StrategyMode.INVERSE else "")
+                + "INVERSA",
+                callback_data="mode_inverse",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                ("✅ " if p.strategy_mode is StrategyMode.COMPARE else "")
+                + "ENTRAMBE DEMO",
+                callback_data="mode_compare",
+            ),
+            InlineKeyboardButton("📊 Risultati", callback_data="strategy_results"),
         ],
         [InlineKeyboardButton("📈 Regole RSI", callback_data="strategy_info")],
         [
@@ -445,17 +510,15 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         keyboard = None
         if url and urlparse(url).scheme == "https":
             keyboard = InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Accedi e collega il conto ↗", url=url)]]
+                [[InlineKeyboardButton("Apri PocketSignals in Telegram ↗", url=url)]]
             )
-            extra = "\n\n✅ Collegamento ufficiale pronto nel pulsante qui sotto."
+            extra = "\n\n✅ Premi il pulsante qui sotto: non apre il sito web."
         await query.message.reply_text(
-            "🔗 <b>COLLEGAMENTO POCKET OPTION</b>\n\n"
-            "Accedi con il tuo account Pocket Option e collega il Telegram Signal Bot "
-            "ufficiale. Nelle sue impostazioni puoi scegliere DEMO/REAL, importo e Auto-trade.\n\n"
-            "Nota: Pocket Option non fornisce a questo bot personalizzato un'API pubblica "
-            "documentata per eseguire la nostra strategia. Il pulsante collega il conto al "
-            "bot ufficiale Pocket Option; qui RSI resta in prova DEMO e non vengono richieste "
-            "password, cookie o codici del conto." + extra,
+            "🔗 <b>POCKETSIGNALS</b>\n\n"
+            "Ho eliminato il passaggio dal sito. Il pulsante apre direttamente il bot "
+            "Telegram PocketSignals: premi Avvia e segui la sua procedura di collegamento.\n\n"
+            "La strategia personalizzata RSI resta separata e in DEMO finché Pocket Option "
+            "non fornisce un'integrazione ufficiale per segnali esterni." + extra,
             reply_markup=keyboard,
             parse_mode=ParseMode.HTML,
         )
@@ -482,12 +545,18 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"Zona alta: <b>{CONFIG.rsi_upper:g}</b>\n"
             "<b>NORMALE</b>: RSI 86 → CALL/BUY; RSI 14 → PUT/SELL.\n"
             "<b>INVERSA</b>: RSI 86 → PUT/SELL; RSI 14 → CALL/BUY.\n"
-            "<b>CONFRONTO</b>: apre entrambe le versioni solo in DEMO.\n"
+            "<b>ENTRAMBE DEMO</b>: apre le due versioni insieme e confronta i risultati.\n"
             "Il segnale scatta una sola volta quando l'RSI entra nella zona estrema.\n"
             f"Mercati: <b>{html.escape(symbols)}</b>\n"
             f"Feed: {feed}\n\n"
             "L'RSI non è una percentuale di probabilità: il bot non trasforma il valore RSI in una promessa di vincita.",
             parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if data == "strategy_results":
+        await query.message.reply_text(
+            _comparison_card(chat_id), parse_mode=ParseMode.HTML
         )
         return
 
@@ -523,6 +592,12 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             [StrategyMode.NORMAL, StrategyMode.INVERSE, StrategyMode.COMPARE],
         )
         STORE.set_value(chat_id, "strategy_mode", next_mode.value)
+    elif data == "mode_normal":
+        STORE.set_value(chat_id, "strategy_mode", StrategyMode.NORMAL.value)
+    elif data == "mode_inverse":
+        STORE.set_value(chat_id, "strategy_mode", StrategyMode.INVERSE.value)
+    elif data == "mode_compare":
+        STORE.set_value(chat_id, "strategy_mode", StrategyMode.COMPARE.value)
     elif data == "amount":
         STORE.set_value(
             chat_id,
