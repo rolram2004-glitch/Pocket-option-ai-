@@ -1,5 +1,11 @@
 # Pocket AI Telegram — DEMO-first
 
+Release attuale: `DUAL-DEMO-v6`.
+
+La modalità `ENTRAMBE DEMO` mantiene due saldi virtuali indipendenti, apre
+NORMALE e INVERSA sullo stesso evento RSI e mostra con `/results` il confronto
+degli ultimi sette giorni.
+
 Bot Telegram in italiano per leggere/normalizzare segnali di opzioni, applicare
 controlli di rischio e provarli con un ledger DEMO virtuale. È pronto per essere
 eseguito in locale o come worker su Railway.
