@@ -29,6 +29,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO
 )
 log = logging.getLogger("pocket-ai")
+BOT_RELEASE = "SENZA-LINK-v4"
 
 CONFIG = Settings.from_env()
 STORE = Store(
@@ -131,8 +132,9 @@ def _dashboard(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
     auto = "ON" if p.auto_demo else "OFF"
     strategy = "ON" if p.strategy_on else "OFF"
     text = (
-        "<b>POCKET AI • CONTROL CENTER</b>\n"
+        "<b>POCKET AI • DEMO CONTROL CENTER</b>\n"
         "━━━━━━━━━━━━━━━━━━\n"
+        f"Versione: ✅ <b>{BOT_RELEASE}</b>\n"
         f"Modalità: 🧪 <b>DEMO locale</b>\n"
         f"Stato: {status}\n"
         f"Saldo virtuale: <b>${p.demo_balance:,.2f}</b>\n"
@@ -203,6 +205,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await start(update, context)
+
+
+async def version(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _guard(update):
+        return
+    assert update.effective_message
+    await update.effective_message.reply_text(
+        f"✅ Versione attiva: {BOT_RELEASE}\n"
+        "Nessun pulsante o collegamento esterno è presente in questa versione."
+    )
 
 
 def _signal_card(signal: Signal) -> str:
@@ -624,6 +636,7 @@ def main() -> None:
     )
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("version", version))
     app.add_handler(CommandHandler("signal", signal_command))
     app.add_handler(CommandHandler("settle", settle))
     app.add_handler(CallbackQueryHandler(callback))
