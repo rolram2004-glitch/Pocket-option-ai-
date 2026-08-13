@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 
 from models import Direction, Profile, Signal, StrategyMode, Trade
@@ -23,10 +25,18 @@ class Store:
         self.default_min_confidence = default_min_confidence
         self._init_db()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _init_db(self) -> None:
         with self._connect() as conn:
@@ -468,3 +478,4 @@ class Store:
             exit_price=row["exit_price"],
             expiry_at=row["expiry_at"],
         )
+
