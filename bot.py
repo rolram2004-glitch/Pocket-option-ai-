@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 
 from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -29,8 +30,12 @@ from strategy import RsiLevel, direction_for_rsi_level, rsi_level_cross_signal
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO
 )
+# The Telegram Bot API embeds the bot token in request URLs.  Keep transport
+# libraries below INFO so deployment logs can never disclose that credential.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 log = logging.getLogger("pocket-ai")
-BOT_RELEASE = "DUAL-DEMO-v6"
+BOT_RELEASE = "AGGRESSIVE-DEMO-v7"
 
 CONFIG = Settings.from_env()
 STORE = Store(
@@ -490,7 +495,9 @@ async def post_init(app: Application) -> None:
         ]
     )
     identity = await app.bot.get_me()
-    app.create_task(strategy_worker(app), name="rsi-auto-strategy")
+    app.bot_data["strategy_worker_task"] = asyncio.create_task(
+        strategy_worker(app), name="rsi-auto-strategy"
+    )
     log.info(
         "Telegram ready: @%s release=%s; RSI worker: %s (%s)",
         identity.username,
@@ -498,6 +505,14 @@ async def post_init(app: Application) -> None:
         MARKET_LABEL,
         ", ".join(ACTIVE_SYMBOLS),
     )
+
+
+async def post_shutdown(app: Application) -> None:
+    task = app.bot_data.get("strategy_worker_task")
+    if isinstance(task, asyncio.Task):
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 async def settle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -571,8 +586,10 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"RSI: <b>{CONFIG.rsi_period}</b> periodi\n"
             f"Zona bassa: <b>{CONFIG.rsi_lower:g}</b>\n"
             f"Zona alta: <b>{CONFIG.rsi_upper:g}</b>\n"
-            "<b>NORMALE</b>: RSI 86 → CALL/BUY; RSI 14 → PUT/SELL.\n"
-            "<b>INVERSA</b>: RSI 86 → PUT/SELL; RSI 14 → CALL/BUY.\n"
+            f"<b>NORMALE</b>: RSI {CONFIG.rsi_upper:g} → CALL/BUY; "
+            f"RSI {CONFIG.rsi_lower:g} → PUT/SELL.\n"
+            f"<b>INVERSA</b>: RSI {CONFIG.rsi_upper:g} → PUT/SELL; "
+            f"RSI {CONFIG.rsi_lower:g} → CALL/BUY.\n"
             "<b>ENTRAMBE DEMO</b>: apre le due versioni insieme e confronta i risultati.\n"
             "Il segnale scatta una sola volta quando l'RSI entra nella zona estrema.\n"
             f"Mercati: <b>{html.escape(symbols)}</b>\n"
@@ -672,6 +689,7 @@ def main() -> None:
         Application.builder()
         .token(CONFIG.telegram_bot_token)
         .post_init(post_init)
+        .post_shutdown(post_shutdown)
         .build()
     )
     app.add_handler(CommandHandler("start", start))
@@ -689,3 +707,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
