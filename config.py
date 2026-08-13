@@ -50,7 +50,9 @@ class Settings:
         allowed = os.getenv("TELEGRAM_ALLOWED_CHAT_ID", "").strip()
         symbols = tuple(
             symbol.strip().upper()
-            for symbol in os.getenv("AUTO_SYMBOLS", "EUR/USD;GBP/USD;BTC/USD").split(";")
+            for symbol in os.getenv(
+                "AUTO_SYMBOLS", "BTC/USD;ETH/USD;SOL/USD"
+            ).split(";")
             if symbol.strip()
         )
         return cls(
@@ -61,18 +63,18 @@ class Settings:
             demo_start_balance=_float("DEMO_START_BALANCE", 10_000.0),
             default_trade_amount=_float("DEFAULT_TRADE_AMOUNT", 0.6),
             default_expiry_seconds=_int("DEFAULT_EXPIRY_SECONDS", 60),
-            min_signal_confidence=_float("MIN_SIGNAL_CONFIDENCE", 80.0),
+            min_signal_confidence=_float("MIN_SIGNAL_CONFIDENCE", 65.0),
             max_trade_amount=_float("MAX_TRADE_AMOUNT", 10.0),
-            max_daily_trades=_int("MAX_DAILY_TRADES", 20),
+            max_daily_trades=_int("MAX_DAILY_TRADES", 60),
             max_daily_loss=_float("MAX_DAILY_LOSS", 50.0),
             demo_payout=_float("DEMO_PAYOUT", 0.82),
             twelve_data_api_key=os.getenv("TWELVE_DATA_API_KEY", "").strip() or None,
             auto_symbols=symbols,
             market_interval=os.getenv("MARKET_INTERVAL", "1min").strip(),
-            strategy_poll_seconds=_int("STRATEGY_POLL_SECONDS", 15),
-            rsi_period=_int("RSI_PERIOD", 7),
-            rsi_lower=_float("RSI_LOWER", 14.0),
-            rsi_upper=_float("RSI_UPPER", 86.0),
+            strategy_poll_seconds=_int("STRATEGY_POLL_SECONDS", 5),
+            rsi_period=_int("RSI_PERIOD", 5),
+            rsi_lower=_float("RSI_LOWER", 30.0),
+            rsi_upper=_float("RSI_UPPER", 70.0),
             database_path=os.getenv("DATABASE_PATH", "pocket_ai.sqlite3").strip(),
         )
 
@@ -97,3 +99,4 @@ class Settings:
             raise RuntimeError(
                 "AUTO_SYMBOLS non accetta OTC: il feed esterno non è il feed OTC di Pocket Option"
             )
+
