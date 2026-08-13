@@ -1,6 +1,6 @@
 # Pocket AI Telegram — DEMO-first
 
-Release attuale: `DUAL-DEMO-v6`.
+Release attuale: `AGGRESSIVE-DEMO-v7`.
 
 La modalità `ENTRAMBE DEMO` mantiene due saldi virtuali indipendenti, apre
 NORMALE e INVERSA sullo stesso evento RSI e mostra con `/results` il confronto
@@ -33,20 +33,22 @@ eseguito in locale o come worker su Railway.
 
 La configurazione iniziale è intenzionalmente semplice e modificabile:
 
-- `RSI_PERIOD=7`
-- `RSI_LOWER=14`
-- `RSI_UPPER=86`
+- `RSI_PERIOD=5`
+- `RSI_LOWER=30`
+- `RSI_UPPER=70`
+- mercati pubblici predefiniti: `BTC/USD`, `ETH/USD`, `SOL/USD`;
+- controllo ogni 5 secondi e massimo 60 trade al giorno per variante;
 - importo DEMO iniziale: `$0.60` (modificabile dal pannello Telegram);
-- **NORMALE**: ingresso in zona 86 → `CALL/BUY`; ingresso in zona 14 → `PUT/SELL`;
-- **INVERSA**: ingresso in zona 86 → `PUT/SELL`; ingresso in zona 14 → `CALL/BUY`;
+- **NORMALE**: ingresso in zona 70 → `CALL/BUY`; ingresso in zona 30 → `PUT/SELL`;
+- **INVERSA**: ingresso in zona 70 → `PUT/SELL`; ingresso in zona 30 → `CALL/BUY`;
 - **ENTRAMBE DEMO**: registra entrambe le versioni in parallelo nel ledger DEMO;
 - una sola decisione per candela;
 - esecuzione automatica solo sul ledger DEMO locale;
 - chiusura automatica alla scadenza usando di nuovo il prezzo reale del feed.
 
 La decisione scatta quando l'RSI attraversa la soglia ed entra nella zona
-estrema. Il controllo dell'attraversamento evita che un RSI fermo sopra 86 o
-sotto 14 crei una raffica di ordini duplicati.
+estrema. Le soglie 30/70 generano più occasioni delle precedenti 14/86, mentre
+il controllo dell'attraversamento impedisce raffiche di ordini duplicati.
 
 Per accenderla premi **📡 RSI AUTO** in Telegram: non serve alcuna chiave.
 Senza `TWELVE_DATA_API_KEY` il bot usa il feed pubblico Kraken per `BTC/USD`
@@ -132,3 +134,4 @@ python -m unittest discover -s tests -v
 ```
 
 I test coprono parsing, rifiuto di segnali incompleti e contabilità DEMO.
+
