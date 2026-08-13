@@ -3,12 +3,14 @@ import tempfile
 import unittest
 from pathlib import Path
 import sys
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from models import Candle, Direction, StrategyMode  # noqa: E402
+from config import Settings  # noqa: E402
 from market import KrakenPublicMarket  # noqa: E402
 from parser import parse_signal  # noqa: E402
 from risk import check_demo_trade  # noqa: E402
@@ -19,6 +21,20 @@ from strategy import (  # noqa: E402
     rsi_level_cross_signal,
     rsi_series,
 )
+
+
+class ConfigTests(unittest.TestCase):
+    def test_aggressive_demo_defaults_remain_demo_only(self):
+        with patch.dict(os.environ, {}, clear=True):
+            settings = Settings.from_env()
+        self.assertEqual(settings.rsi_period, 5)
+        self.assertEqual((settings.rsi_lower, settings.rsi_upper), (30.0, 70.0))
+        self.assertEqual(settings.strategy_poll_seconds, 5)
+        self.assertEqual(settings.max_daily_trades, 60)
+        self.assertEqual(
+            settings.auto_symbols, ("BTC/USD", "ETH/USD", "SOL/USD")
+        )
+        self.assertEqual(settings.default_trade_amount, 0.6)
 
 
 class ParserTests(unittest.TestCase):
@@ -197,3 +213,4 @@ class LedgerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
